@@ -1,6 +1,6 @@
 export const config = {
   // The mock server URL
-  baseUrl: process.env.MOCK_BASE_URL ?? 'https://mocktrading-silk.vercel.app',
+  baseURL: process.env.MOCK_BASE_URL ?? 'https://mocktrading-silk.vercel.app',
 
   // Timeout for mock-api requests
   requestTimeout: 30000, // in milliseconds (30 seconds)
