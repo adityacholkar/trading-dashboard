@@ -35,7 +35,11 @@ Environment variables (all optional): `PORT` (default 4000), `MOCK_BASE_URL` (de
 
 ## Deploying
 
-The repo includes a [render.yaml](render.yaml) blueprint for Render: one free web service that builds the client, builds the server, and serves everything from a single URL. On Render's free tier the service spins down after 15 idle minutes; the first visit after that takes ~30–60 s to cold-start plus ~10 s while the server refetches the trade history — the UI shows its "warming up" banner during this, and the live-price socket reconnects automatically.
+The repo includes a [render.yaml](render.yaml) blueprint for Render: one free web service that builds the client, builds the server, and serves everything from a single URL.
+
+**Why Render?** The backend needs a host that runs a persistent Node process: it holds the trades snapshot in memory, keeps a long-lived WebSocket open to the mock feed, and serves its own WebSocket relay to browsers. That rules out serverless platforms (Vercel, Netlify) outright — functions can't hold WebSocket connections or in-memory state between invocations. Among the hosts that do run persistent processes, Render is the only one left with a genuinely free tier (no credit card): Railway offers a one-time trial credit that runs out, and Fly.io is pay-as-you-go. Render also injects `PORT` (which the server already reads) and supports WebSockets on the free plan, so the app deploys with zero code changes.
+
+**The trade-off:** Render's free tier spins the service down after 15 idle minutes; the first visit after that takes ~30–60 s to cold-start plus ~10 s while the server refetches the trade history. This is the failure mode the app was already built for — the UI shows its "warming up" banner during the refetch, and the live-price socket reconnects automatically once the relay is back. A free uptime monitor pinging `/api/health` keeps the service warm if needed.
 
 ## How the data flows
 
