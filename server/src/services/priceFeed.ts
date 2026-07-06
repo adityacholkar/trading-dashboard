@@ -100,9 +100,9 @@ function connect(): void {
 function bumpIdleTimer(): void {
   if (idleTimer) clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    log.warn(`no messages for ${config.reconnectDelay} ms, assuming dead connection`);
+    log.warn(`no messages for ${config.idleTimeout} ms, assuming dead connection`);
     ws?.terminate();
-  }, config.reconnectDelay);
+  }, config.idleTimeout);
   idleTimer.unref();
 }
 
