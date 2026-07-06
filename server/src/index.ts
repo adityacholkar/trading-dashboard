@@ -1,7 +1,10 @@
 import express from 'express';
+import http from 'node:http';
 import { config } from './config.js';
 import { getMeta, refresh } from './services/tradesStore.js';
 import { apiRouter } from './routes/api.js';
+import { startPriceFeed } from './services/priceFeed.js';
+import { attachWsRelay } from './websocket/websocketRelay.js';
 
 const app = express();
 
@@ -20,8 +23,12 @@ app.post('/api/refresh', (_req, res) => {
 
 app.use('/api', apiRouter);
 
-app.listen(config.port, () => {
+const server = http.createServer(app);
+attachWsRelay(server);
+
+server.listen(config.port, () => {
   console.log(`[server] listening on http://localhost:${config.port}`);
   void refresh(); // fetch the day's data on boot
   setInterval(() => void refresh(), config.refreshInterval).unref();
+  startPriceFeed();
 });
