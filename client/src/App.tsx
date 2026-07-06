@@ -1,122 +1,136 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  api,
+  WarmingUpError,
+  type DailyPnlPoint,
+  type Instrument,
+  type InstrumentRow,
+  type Meta,
+  type Summary,
+} from './api';
+import { timeOf } from './format';
+import { useLivePrices } from './useLivePrices';
+import { SummaryCards } from './components/SummaryCards';
+import { InstrumentTable } from './components/InstrumentTable';
+import { DailyPnlChart } from './components/DailyPnlChart';
+import { LivePrices } from './components/LivePrices';
 
-function App() {
-  const [count, setCount] = useState(0)
-
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+interface DashboardData {
+  summary: Summary;
+  byInstrument: InstrumentRow[];
+  dailyPnl: DailyPnlPoint[];
 }
 
-export default App
+function App(): ReactElement {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [warmingUp, setWarmingUp] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const pollTimer = useRef<number | undefined>(undefined);
+  const { prices, connected } = useLivePrices();
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      const [summary, byInstrument, dailyPnl, m] = await Promise.all([
+        api.summary(),
+        api.instrumentsPerformance(),
+        api.dailyPnl(),
+        api.meta(),
+      ]);
+      setData({ summary, byInstrument, dailyPnl });
+      setMeta(m);
+      setWarmingUp(false);
+      setLoadError(null);
+    } catch (err) {
+      if (err instanceof WarmingUpError) {
+        // Backend just booted and is still fetching its first snapshot.
+        setWarmingUp(true);
+        window.setTimeout(() => void loadDashboard(), 2000);
+      } else {
+        setLoadError((err as Error).message);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+    api
+      .instruments()
+      .then(setInstruments)
+      .catch(() => setInstruments([]));
+    return () => window.clearInterval(pollTimer.current);
+  }, [loadDashboard]);
+
+  async function handleRefresh(): Promise<void> {
+    setRefreshing(true);
+    await api.refresh();
+    // The fetch runs server-side in the background; poll /api/meta until it
+    // finishes, then pull the rebuilt aggregates.
+    pollTimer.current = window.setInterval(async () => {
+      const m = await api.meta();
+      setMeta(m);
+      if (!m.refreshing) {
+        window.clearInterval(pollTimer.current);
+        setRefreshing(false);
+        await loadDashboard();
+      }
+    }, 2000);
+  }
+
+  return (
+    <main>
+      <header>
+        <h1>Trading Dashboard</h1>
+        <div className="status-bar">
+          <button onClick={handleRefresh} disabled={refreshing}>
+            {refreshing ? 'Refreshing…' : 'Refresh data'}
+          </button>
+          {meta?.lastUpdated && <span>Data as of {timeOf(meta.lastUpdated)}</span>}
+          <span className={connected ? 'pos' : 'muted'}>
+            {connected ? '● live prices connected' : '○ live prices reconnecting…'}
+          </span>
+        </div>
+        {meta?.lastError && (
+          <p className="banner error">
+            Last refresh failed at {timeOf(meta.lastError.at)} ({meta.lastError.message})
+            {meta.lastUpdated && ` — still showing data from ${timeOf(meta.lastUpdated)}`}
+          </p>
+        )}
+        {warmingUp && (
+          <p className="banner">
+            First load: the server is fetching the trade history from the source (~10 s)…
+          </p>
+        )}
+        {loadError && <p className="banner error">Failed to load dashboard: {loadError}</p>}
+      </header>
+
+      {data && (
+        <>
+          <section>
+            <h2>1. Overall performance</h2>
+            <SummaryCards summary={data.summary} />
+          </section>
+
+          <section>
+            <h2>2. Performance by instrument</h2>
+            <InstrumentTable rows={data.byInstrument} />
+          </section>
+
+          <section>
+            <h2>3. Daily P&L (past year)</h2>
+            <DailyPnlChart data={data.dailyPnl} />
+          </section>
+        </>
+      )}
+
+      <section>
+        <h2>4. Live prices</h2>
+        <LivePrices instruments={instruments} prices={prices} />
+      </section>
+    </main>
+  );
+}
+
+export default App;
